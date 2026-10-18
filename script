@@ -1,0 +1,901 @@
+--// Forsaken Skin Browser
+--// Single-file script.lua
+--// Dynamic Skin Scanner + Purchase GUI
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+--// CONFIG
+
+local CONFIG = {
+    GUIName = "ForsakenSkinBrowser",
+
+    Background = Color3.fromRGB(18, 18, 24),
+    Panel = Color3.fromRGB(28, 28, 36),
+    Item = Color3.fromRGB(38, 38, 48),
+
+    Accent = Color3.fromRGB(115, 85, 255),
+    AccentHover = Color3.fromRGB(145, 115, 255),
+
+    Text = Color3.fromRGB(240, 240, 245),
+    MutedText = Color3.fromRGB(165, 165, 180),
+
+    Success = Color3.fromRGB(65, 190, 115),
+    Error = Color3.fromRGB(230, 75, 85),
+
+    Width = 600,
+    Height = 470
+}
+
+--// REMOVE OLD GUI
+
+local oldGui = PlayerGui:FindFirstChild(CONFIG.GUIName)
+
+if oldGui then
+    oldGui:Destroy()
+end
+
+--// FIND REQUIRED OBJECTS
+
+local Assets
+local SkinsFolder
+local PurchaseRemote
+
+local function findGameObjects()
+
+    local success, err = pcall(function()
+
+        Assets = ReplicatedStorage:WaitForChild("Assets", 10)
+
+        if not Assets then
+            error("Assets folder not found")
+        end
+
+        SkinsFolder = Assets:WaitForChild("Skins", 10)
+
+        if not SkinsFolder then
+            error("Skins folder not found")
+        end
+
+        local Modules = ReplicatedStorage:WaitForChild("Modules", 10)
+        local NetworkModule = Modules:WaitForChild("Network", 10)
+        local Network = NetworkModule:WaitForChild("Network", 10)
+
+        PurchaseRemote = Network:WaitForChild("RemoteFunction", 10)
+
+        if not PurchaseRemote or not PurchaseRemote:IsA("RemoteFunction") then
+            error("Purchase RemoteFunction not found")
+        end
+
+    end)
+
+    if not success then
+        warn("[Forsaken Skin Browser] " .. tostring(err))
+    end
+
+    return success
+
+end
+
+--// GUI HELPERS
+
+local function create(className, properties, parent)
+
+    local object = Instance.new(className)
+
+    for property, value in pairs(properties) do
+        object[property] = value
+    end
+
+    object.Parent = parent
+
+    return object
+
+end
+
+local function corner(object, radius)
+
+    create("UICorner", {
+        CornerRadius = UDim.new(0, radius)
+    }, object)
+
+end
+
+local function stroke(object, color, thickness)
+
+    create("UIStroke", {
+        Color = color,
+        Thickness = thickness or 1,
+        Transparency = 0.45
+    }, object)
+
+end
+
+local function padding(object, amount)
+
+    create("UIPadding", {
+        PaddingTop = UDim.new(0, amount),
+        PaddingBottom = UDim.new(0, amount),
+        PaddingLeft = UDim.new(0, amount),
+        PaddingRight = UDim.new(0, amount)
+    }, object)
+
+end
+
+--// MAIN GUI
+
+local ScreenGui = create("ScreenGui", {
+    Name = CONFIG.GUIName,
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+}, PlayerGui)
+
+local Main = create("Frame", {
+    Name = "Main",
+
+    Size = UDim2.fromOffset(
+        CONFIG.Width,
+        CONFIG.Height
+    ),
+
+    Position = UDim2.new(
+        0.5,
+        -CONFIG.Width / 2,
+        0.5,
+        -CONFIG.Height / 2
+    ),
+
+    BackgroundColor3 = CONFIG.Background,
+    BorderSizePixel = 0
+}, ScreenGui)
+
+corner(Main, 14)
+stroke(Main, CONFIG.Accent, 1.5)
+
+--// HEADER
+
+local Header = create("Frame", {
+    Name = "Header",
+
+    Size = UDim2.new(1, 0, 0, 52),
+
+    BackgroundColor3 = CONFIG.Panel,
+    BorderSizePixel = 0
+}, Main)
+
+corner(Header, 14)
+
+local Title = create("TextLabel", {
+    Name = "Title",
+
+    Size = UDim2.new(1, -120, 1, 0),
+    Position = UDim2.fromOffset(18, 0),
+
+    BackgroundTransparency = 1,
+
+    Text = "FORSAKEN  |  SKIN BROWSER",
+
+    Font = Enum.Font.GothamBold,
+    TextSize = 17,
+
+    TextColor3 = CONFIG.Text,
+    TextXAlignment = Enum.TextXAlignment.Left
+}, Header)
+
+local CloseButton = create("TextButton", {
+    Name = "Close",
+
+    Size = UDim2.fromOffset(34, 32),
+    Position = UDim2.new(1, -43, 0, 10),
+
+    BackgroundColor3 = CONFIG.Error,
+
+    Text = "×",
+    TextSize = 23,
+    Font = Enum.Font.GothamBold,
+
+    TextColor3 = Color3.new(1, 1, 1),
+
+    BorderSizePixel = 0
+}, Header)
+
+corner(CloseButton, 8)
+
+CloseButton.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+--// DRAGGING
+
+local dragging = false
+local dragStart
+local startPosition
+local dragInput
+
+Header.InputBegan:Connect(function(input)
+
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragging = true
+        dragStart = input.Position
+        startPosition = Main.Position
+
+        input.Changed:Connect(function()
+
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+
+        end)
+
+    end
+
+end)
+
+Header.InputChanged:Connect(function(input)
+
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragInput = input
+
+    end
+
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+
+    if dragging and input == dragInput then
+
+        local delta = input.Position - dragStart
+
+        Main.Position = UDim2.new(
+            startPosition.X.Scale,
+            startPosition.X.Offset + delta.X,
+            startPosition.Y.Scale,
+            startPosition.Y.Offset + delta.Y
+        )
+
+    end
+
+end)
+
+--// SEARCH BAR
+
+local SearchBox = create("TextBox", {
+    Name = "Search",
+
+    Size = UDim2.new(1, -145, 0, 38),
+    Position = UDim2.fromOffset(15, 67),
+
+    BackgroundColor3 = CONFIG.Panel,
+
+    PlaceholderText = "Search skins, characters, categories...",
+    PlaceholderColor3 = CONFIG.MutedText,
+
+    Text = "",
+    ClearTextOnFocus = false,
+
+    Font = Enum.Font.Gotham,
+    TextSize = 14,
+    TextColor3 = CONFIG.Text,
+
+    TextXAlignment = Enum.TextXAlignment.Left,
+
+    BorderSizePixel = 0
+}, Main)
+
+corner(SearchBox, 8)
+padding(SearchBox, 10)
+
+local RefreshButton = create("TextButton", {
+    Name = "Refresh",
+
+    Size = UDim2.fromOffset(105, 38),
+    Position = UDim2.new(1, -120, 0, 67),
+
+    BackgroundColor3 = CONFIG.Accent,
+
+    Text = "Refresh",
+
+    Font = Enum.Font.GothamBold,
+    TextSize = 13,
+
+    TextColor3 = CONFIG.Text,
+
+    BorderSizePixel = 0
+}, Main)
+
+corner(RefreshButton, 8)
+
+--// COUNTER
+
+local Counter = create("TextLabel", {
+    Name = "Counter",
+
+    Size = UDim2.new(1, -30, 0, 25),
+    Position = UDim2.fromOffset(15, 111),
+
+    BackgroundTransparency = 1,
+
+    Text = "Skins found: 0",
+
+    Font = Enum.Font.Gotham,
+    TextSize = 12,
+
+    TextColor3 = CONFIG.MutedText,
+    TextXAlignment = Enum.TextXAlignment.Left
+}, Main)
+
+--// SCROLLING LIST
+
+local Scroll = create("ScrollingFrame", {
+    Name = "SkinList",
+
+    Size = UDim2.new(1, -30, 1, -195),
+    Position = UDim2.fromOffset(15, 141),
+
+    BackgroundColor3 = CONFIG.Panel,
+    BorderSizePixel = 0,
+
+    ScrollBarThickness = 5,
+    ScrollBarImageColor3 = CONFIG.Accent,
+
+    CanvasSize = UDim2.new(0, 0, 0, 0),
+
+    AutomaticCanvasSize = Enum.AutomaticSize.Y
+}, Main)
+
+corner(Scroll, 10)
+padding(Scroll, 8)
+
+local Layout = create("UIListLayout", {
+    Padding = UDim.new(0, 7),
+    SortOrder = Enum.SortOrder.LayoutOrder
+}, Scroll)
+
+--// NOTIFICATION
+
+local Notification = create("TextLabel", {
+    Name = "Notification",
+
+    Size = UDim2.new(1, -30, 0, 34),
+    Position = UDim2.new(0, 15, 1, -43),
+
+    BackgroundColor3 = CONFIG.Panel,
+
+    Text = "Ready",
+
+    Font = Enum.Font.Gotham,
+    TextSize = 13,
+
+    TextColor3 = CONFIG.MutedText,
+
+    BorderSizePixel = 0
+}, Main)
+
+corner(Notification, 8)
+
+local notificationId = 0
+
+local function notify(message, color)
+
+    notificationId += 1
+
+    local currentId = notificationId
+
+    Notification.Text = tostring(message)
+    Notification.TextColor3 = color or CONFIG.Text
+
+    task.delay(4, function()
+
+        if currentId == notificationId
+            and Notification.Parent then
+
+            Notification.Text = "Ready"
+            Notification.TextColor3 = CONFIG.MutedText
+
+        end
+
+    end)
+
+end
+
+--// DATA STORAGE
+
+local FoundSkins = {}
+
+--// SCAN ALL SKINS
+
+local function scanSkins()
+
+    table.clear(FoundSkins)
+
+    if not SkinsFolder then
+        notify("Skin not found: Assets.Skins", CONFIG.Error)
+        return
+    end
+
+    local success, err = pcall(function()
+
+        -- Expected structure:
+        --
+        -- Assets
+        --   Skins
+        --     Survivors
+        --       Shedletsky
+        --         ModernShedletsky
+        --
+        --     Killers
+        --       Character
+        --         Skin
+        --
+        -- Additional categories are supported.
+
+        for _, category in ipairs(SkinsFolder:GetChildren()) do
+
+            for _, character in ipairs(category:GetChildren()) do
+
+                for _, skin in ipairs(character:GetChildren()) do
+
+                    table.insert(FoundSkins, {
+                        Name = skin.Name,
+                        Character = character.Name,
+                        Category = category.Name,
+                        Instance = skin
+                    })
+
+                end
+
+            end
+
+        end
+
+    end)
+
+    if not success then
+
+        warn("[Skin Scanner] " .. tostring(err))
+        notify("Skin scan failed", CONFIG.Error)
+
+        return
+
+    end
+
+    table.sort(FoundSkins, function(a, b)
+
+        if a.Category ~= b.Category then
+            return a.Category < b.Category
+        end
+
+        if a.Character ~= b.Character then
+            return a.Character < b.Character
+        end
+
+        return a.Name < b.Name
+
+    end)
+
+    Counter.Text = "Skins found: " .. tostring(#FoundSkins)
+
+end
+
+--// VALIDATE SERVER RESPONSE
+
+local function isPurchaseConfirmed(result)
+
+    -- Only explicit positive responses count as confirmation.
+    -- The actual response format depends on the game server.
+
+    if result == true then
+        return true
+    end
+
+    if type(result) == "table" then
+
+        if result.Success == true then
+            return true
+        end
+
+        if result.success == true then
+            return true
+        end
+
+        if result.Purchased == true then
+            return true
+        end
+
+        if result.purchased == true then
+            return true
+        end
+
+    end
+
+    return false
+
+end
+
+--// PURCHASE FUNCTION
+
+local PurchaseInProgress = false
+
+local function purchaseSkin(selectedSkin)
+
+    if PurchaseInProgress then
+        notify("Purchase already in progress", CONFIG.Error)
+        return
+    end
+
+    if not selectedSkin then
+        notify("Skin not found", CONFIG.Error)
+        return
+    end
+
+    if not selectedSkin:IsDescendantOf(SkinsFolder) then
+        notify("Skin not found", CONFIG.Error)
+        return
+    end
+
+    if not PurchaseRemote then
+        notify("Purchase failed: RemoteFunction missing", CONFIG.Error)
+        return
+    end
+
+    PurchaseInProgress = true
+
+    notify("Purchasing " .. selectedSkin.Name .. "...", CONFIG.Accent)
+
+    task.spawn(function()
+
+        local args = {
+            [1] = "PurchaseContent",
+
+            [2] = {
+                [1] = selectedSkin,
+                [2] = nil
+            }
+        }
+
+        local success, result = pcall(function()
+
+            return PurchaseRemote:InvokeServer(
+                unpack(args)
+            )
+
+        end)
+
+        PurchaseInProgress = false
+
+        if not success then
+
+            warn(
+                "[Purchase Error] "
+                .. tostring(result)
+            )
+
+            notify("Purchase failed", CONFIG.Error)
+
+            return
+
+        end
+
+        if isPurchaseConfirmed(result) then
+
+            notify("Skin purchased", CONFIG.Success)
+
+        else
+
+            -- The server returned no recognizable confirmation.
+            -- Do not claim that the purchase succeeded.
+
+            warn(
+                "[Purchase] Unconfirmed server response:",
+                result
+            )
+
+            notify(
+                "Purchase failed or not confirmed",
+                CONFIG.Error
+            )
+
+        end
+
+    end)
+
+end
+
+--// CLEAR LIST
+
+local function clearList()
+
+    for _, child in ipairs(Scroll:GetChildren()) do
+
+        if child:IsA("Frame") then
+            child:Destroy()
+        end
+
+    end
+
+end
+
+--// CREATE SKIN ENTRY
+
+local function createSkinEntry(skinData, index)
+
+    local Item = create("Frame", {
+        Name = "Skin_" .. tostring(index),
+
+        Size = UDim2.new(1, -4, 0, 62),
+
+        BackgroundColor3 = CONFIG.Item,
+
+        BorderSizePixel = 0,
+
+        LayoutOrder = index
+    }, Scroll)
+
+    corner(Item, 8)
+
+    local SkinName = create("TextLabel", {
+        Name = "SkinName",
+
+        Size = UDim2.new(1, -115, 0, 27),
+        Position = UDim2.fromOffset(12, 6),
+
+        BackgroundTransparency = 1,
+
+        Text = skinData.Name,
+
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+
+        TextColor3 = CONFIG.Text,
+
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd
+    }, Item)
+
+    local CharacterName = create("TextLabel", {
+        Name = "CharacterName",
+
+        Size = UDim2.new(1, -115, 0, 20),
+        Position = UDim2.fromOffset(12, 33),
+
+        BackgroundTransparency = 1,
+
+        Text = skinData.Category .. " / " .. skinData.Character,
+
+        Font = Enum.Font.Gotham,
+        TextSize = 11,
+
+        TextColor3 = CONFIG.MutedText,
+
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd
+    }, Item)
+
+    local BuyButton = create("TextButton", {
+        Name = "Buy",
+
+        Size = UDim2.fromOffset(82, 35),
+        Position = UDim2.new(1, -94, 0.5, -17),
+
+        BackgroundColor3 = CONFIG.Accent,
+
+        Text = "Buy",
+
+        Font = Enum.Font.GothamBold,
+        TextSize = 13,
+
+        TextColor3 = CONFIG.Text,
+
+        BorderSizePixel = 0
+    }, Item)
+
+    corner(BuyButton, 7)
+
+    BuyButton.MouseEnter:Connect(function()
+
+        TweenService:Create(
+            BuyButton,
+            TweenInfo.new(0.15),
+            {
+                BackgroundColor3 = CONFIG.AccentHover
+            }
+        ):Play()
+
+    end)
+
+    BuyButton.MouseLeave:Connect(function()
+
+        TweenService:Create(
+            BuyButton,
+            TweenInfo.new(0.15),
+            {
+                BackgroundColor3 = CONFIG.Accent
+            }
+        ):Play()
+
+    end)
+
+    BuyButton.MouseButton1Click:Connect(function()
+
+        local selectedSkin = skinData.Instance
+
+        if not selectedSkin
+            or not selectedSkin:IsDescendantOf(SkinsFolder) then
+
+            notify("Skin not found", CONFIG.Error)
+            return
+
+        end
+
+        purchaseSkin(selectedSkin)
+
+    end)
+
+end
+
+--// RENDER SKINS
+
+local function renderSkins()
+
+    clearList()
+
+    local query = string.lower(SearchBox.Text)
+
+    local visibleCount = 0
+
+    for _, skinData in ipairs(FoundSkins) do
+
+        local searchText = string.lower(
+            skinData.Name
+            .. " "
+            .. skinData.Character
+            .. " "
+            .. skinData.Category
+        )
+
+        local matches = query == ""
+            or string.find(
+                searchText,
+                query,
+                1,
+                true
+            ) ~= nil
+
+        if matches then
+
+            visibleCount += 1
+
+            createSkinEntry(
+                skinData,
+                visibleCount
+            )
+
+        end
+
+    end
+
+    Counter.Text = string.format(
+        "Skins found: %d | Showing: %d",
+        #FoundSkins,
+        visibleCount
+    )
+
+    if visibleCount == 0 then
+
+        local EmptyLabel = create("TextLabel", {
+            Name = "Empty",
+
+            Size = UDim2.new(1, -10, 0, 60),
+
+            BackgroundTransparency = 1,
+
+            Text = "No skins found",
+
+            Font = Enum.Font.Gotham,
+            TextSize = 14,
+
+            TextColor3 = CONFIG.MutedText,
+
+            LayoutOrder = 1
+        }, Scroll)
+
+    end
+
+end
+
+--// REFRESH
+
+local refreshing = false
+
+local function refreshSkins()
+
+    if refreshing then
+        return
+    end
+
+    refreshing = true
+
+    RefreshButton.Text = "Scanning..."
+
+    task.spawn(function()
+
+        local success, err = pcall(function()
+
+            scanSkins()
+            renderSkins()
+
+        end)
+
+        refreshing = false
+
+        if not RefreshButton.Parent then
+            return
+        end
+
+        RefreshButton.Text = "Refresh"
+
+        if success then
+
+            notify(
+                "Found " .. tostring(#FoundSkins) .. " skins",
+                CONFIG.Success
+            )
+
+        else
+
+            warn("[Refresh Error] " .. tostring(err))
+
+            notify("Skin scan failed", CONFIG.Error)
+
+        end
+
+    end)
+
+end
+
+--// EVENTS
+
+RefreshButton.MouseButton1Click:Connect(function()
+    refreshSkins()
+end)
+
+SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+
+    renderSkins()
+
+end)
+
+--// INITIALIZATION
+
+task.spawn(function()
+
+    notify("Initializing...", CONFIG.Accent)
+
+    local success = findGameObjects()
+
+    if not success then
+
+        notify(
+            "Failed to locate game objects",
+            CONFIG.Error
+        )
+
+        return
+
+    end
+
+    refreshSkins()
+
+end)
+
+print("[Forsaken Skin Browser] Loaded successfully")
